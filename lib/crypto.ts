@@ -3,7 +3,6 @@ export const bufferToBase64 = (buffer: ArrayBuffer) => {
   return btoa(Array.from(bytes).map(b => String.fromCharCode(b)).join(''));
 };
 
-// Returns standard ArrayBuffer to satisfy Web Crypto strict types
 export const base64ToBuffer = (base64: string): ArrayBuffer => {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -13,7 +12,7 @@ export const base64ToBuffer = (base64: string): ArrayBuffer => {
   return bytes.buffer as ArrayBuffer;
 };
 
-export async function derivePasswordKey(password: string, salt: Uint8Array) {
+export async function derivePasswordKey(password: string, salt: ArrayBuffer) {
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(password),
@@ -25,7 +24,7 @@ export async function derivePasswordKey(password: string, salt: Uint8Array) {
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt: salt as BufferSource, // Cast to BufferSource for TS compatibility
+      salt: salt,
       iterations: 100000,
       hash: "SHA-256"
     },
@@ -37,21 +36,24 @@ export async function derivePasswordKey(password: string, salt: Uint8Array) {
 }
 
 export async function encryptSecret(text: string, password?: string) {
-  let dataToEncrypt: Uint8Array | ArrayBuffer = new TextEncoder().encode(text);
-  let pwdSalt: Uint8Array | undefined;
-  let pwdIv: Uint8Array | undefined;
+  let dataToEncrypt: ArrayBuffer = new TextEncoder().encode(text).buffer as ArrayBuffer;
+  let pwdSaltBuffer: ArrayBuffer | undefined;
+  let pwdIvBuffer: ArrayBuffer | undefined;
 
   if (password) {
-    pwdSalt = crypto.getRandomValues(new Uint8Array(16));
-    pwdIv = crypto.getRandomValues(new Uint8Array(12));
-    const pwdKey = await derivePasswordKey(password, pwdSalt);
+    const saltArray = crypto.getRandomValues(new Uint8Array(16));
+    const ivArray = crypto.getRandomValues(new Uint8Array(12));
     
-    const innerCiphertext = await crypto.subtle.encrypt(
-      { name: "AES-GCM", iv: pwdIv as BufferSource },
+    pwdSaltBuffer = saltArray.buffer as ArrayBuffer;
+    pwdIvBuffer = ivArray.buffer as ArrayBuffer;
+
+    const pwdKey = await derivePasswordKey(password, pwdSaltBuffer);
+    
+    dataToEncrypt = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv: pwdIvBuffer },
       pwdKey,
       dataToEncrypt
     );
-    dataToEncrypt = innerCiphertext;
   }
 
   const urlKey = await crypto.subtle.generateKey(
@@ -59,10 +61,12 @@ export async function encryptSecret(text: string, password?: string) {
     true, 
     ["encrypt", "decrypt"]
   );
-  const urlIv = crypto.getRandomValues(new Uint8Array(12));
   
+  const urlIvArray = crypto.getRandomValues(new Uint8Array(12));
+  const urlIvBuffer = urlIvArray.buffer as ArrayBuffer;
+
   const outerCiphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: urlIv as BufferSource },
+    { name: "AES-GCM", iv: urlIvBuffer },
     urlKey,
     dataToEncrypt
   );
@@ -71,10 +75,10 @@ export async function encryptSecret(text: string, password?: string) {
 
   return {
     base64UrlKey: bufferToBase64(exportedUrlKey),
-    base64UrlIv: bufferToBase64(urlIv.buffer as ArrayBuffer),
+    base64UrlIv: bufferToBase64(urlIvBuffer),
     base64Ciphertext: bufferToBase64(outerCiphertext),
-    base64PwdSalt: pwdSalt ? bufferToBase64(pwdSalt.buffer as ArrayBuffer) : undefined,
-    base64PwdIv: pwdIv ? bufferToBase64(pwdIv.buffer as ArrayBuffer) : undefined,
+    base64PwdSalt: pwdSaltBuffer ? bufferToBase64(pwdSaltBuffer) : undefined,
+    base64PwdIv: pwdIvBuffer ? bufferToBase64(pwdIvBuffer) : undefined,
   };
 }
 
@@ -104,7 +108,7 @@ export async function decryptSecret(
     if (!password) throw new Error("PASSWORD_REQUIRED");
     
     const pwdSaltBuffer = base64ToBuffer(base64PwdSalt);
-    const pwdKey = await derivePasswordKey(password, new Uint8Array(pwdSaltBuffer));
+    const pwdKey = await derivePasswordKey(password, pwdSaltBuffer);
     
     decryptedData = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv: base64ToBuffer(base64PwdIv) },
