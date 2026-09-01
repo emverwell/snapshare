@@ -4,7 +4,7 @@ import {
   MAX_BODY_BYTES,
   getClientIp,
   readBodyWithLimit,
-  secretRatelimit,
+  secretWriteRatelimit,
   validateSecretPayload,
 } from '@/lib/secret-guard';
 
@@ -25,6 +25,15 @@ export async function POST(req: Request) {
     return errorResponse(413, 'payload too large');
   }
 
+  // Real browser traffic (this app's own frontend) always sends Origin on
+  // POST, same-origin or not — only non-browser callers omit it. Requiring
+  // it, rather than only checking it when present, is what makes this check
+  // filter anything instead of only the traffic least likely to be hostile.
+  const origin = req.headers.get('origin');
+  if (!origin || origin !== new URL(req.url).origin) {
+    return errorResponse(403, 'forbidden');
+  }
+
   const bodyText = await readBodyWithLimit(req, MAX_BODY_BYTES);
   if (bodyText === null) {
     return errorResponse(413, 'payload too large');
@@ -32,7 +41,7 @@ export async function POST(req: Request) {
 
   const ip = getClientIp(req);
   try {
-    const { success, reset } = await secretRatelimit.limit(ip);
+    const { success, reset } = await secretWriteRatelimit.limit(ip);
     if (!success) {
       const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
       return errorResponse(429, 'rate limit exceeded', {
@@ -55,11 +64,6 @@ export async function POST(req: Request) {
   const payload = validateSecretPayload(parsedBody);
   if (!payload) {
     return errorResponse(400, 'invalid request');
-  }
-
-  const origin = req.headers.get('origin');
-  if (origin && origin !== new URL(req.url).origin) {
-    return errorResponse(403, 'forbidden');
   }
 
   const id = crypto.randomUUID();
