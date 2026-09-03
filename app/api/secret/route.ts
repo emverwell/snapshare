@@ -20,8 +20,13 @@ export async function POST(req: Request) {
     return errorResponse(415, 'unsupported content type');
   }
 
+  // Content-Length is only a fast-path: reject early when a client is
+  // honest about an oversized body, without opening the stream. Its absence
+  // (e.g. chunked transfer encoding, which never sends this header) is not
+  // itself grounds for rejection — readBodyWithLimit below enforces the same
+  // cap against the real bytes regardless of what any header claims.
   const contentLength = req.headers.get('content-length');
-  if (!contentLength || Number(contentLength) > MAX_BODY_BYTES) {
+  if (contentLength && Number(contentLength) > MAX_BODY_BYTES) {
     return errorResponse(413, 'payload too large');
   }
 
