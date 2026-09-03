@@ -60,11 +60,14 @@ export const secretReadRatelimit = createIpRatelimit(
  * Only safe as an identity key if whatever sits directly in front of this
  * app overwrites (or strips-then-sets) x-forwarded-for from the real TCP
  * peer, rather than passing through a client-supplied value. True on
- * Vercel's edge today. If this app is ever self-hosted or moved behind a
- * different proxy that doesn't sanitize this header, a client can send a
- * different X-Forwarded-For value on every request and fully defeat the
- * rate limiters above (not just misattribute them) — revisit this before
- * that migration, not after.
+ * Vercel's edge today.
+ *
+ * TODO: revisit if this app is ever self-hosted, or if anything (a CDN, a
+ * WAF, a reverse proxy) is ever placed in front of Vercel's own edge —
+ * either can let a client-supplied header through unsanitized, letting a
+ * client send a different X-Forwarded-For value on every request and fully
+ * defeat the rate limiters above (not just misattribute them). Revisit
+ * before that happens, not after.
  */
 export function getClientIp(req: Request): string {
   const forwardedFor = req.headers.get("x-forwarded-for");
