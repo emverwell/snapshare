@@ -44,3 +44,11 @@ services:
     depends_on:
       srh:
         condition: service_healthy
+    healthcheck:
+      # Hits /api/health, which itself calls redis.ping() through srh — a
+      # bare TCP/process check would miss "process is up but can't reach
+      # its dependency," which is exactly the failure mode this is for.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
