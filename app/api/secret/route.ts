@@ -25,6 +25,29 @@ export async function POST(req: Request) {
     return errorResponse(413, 'payload too large');
   }
 
+  // Real browser traffic (this app's own frontend) always sends Origin on
+  // POST, same-origin or not — only non-browser callers omit it. Requiring
+  // it, rather than only checking it when present, is what makes this check
+  // filter anything instead of only the traffic least likely to be hostile.
+  //
+  // Compared against the Host header, not a same-origin URL reconstructed
+  // from req.url: under a standalone server (this app's Docker image),
+  // req.url is built from the server's own bind address/port (HOSTNAME/PORT
+  // env vars), not the client-visible host, so it never matches a real
+  // Origin — Host is what the client actually connected to regardless of
+  // how the process is bound internally.
+  const origin = req.headers.get('origin');
+  const host = req.headers.get('host');
+  let originHost: string | null = null;
+  try {
+    originHost = origin ? new URL(origin).host : null;
+  } catch {
+    originHost = null;
+  }
+  if (!originHost || !host || originHost !== host) {
+    return errorResponse(403, 'forbidden');
+  }
+
   const bodyText = await readBodyWithLimit(req, MAX_BODY_BYTES);
   if (bodyText === null) {
     return errorResponse(413, 'payload too large');
