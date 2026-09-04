@@ -4,7 +4,7 @@ import {
   MAX_BODY_BYTES,
   getClientIp,
   readBodyWithLimit,
-  secretRatelimit,
+  secretWriteRatelimit,
   validateSecretPayload,
 } from '@/lib/secret-guard';
 
@@ -20,8 +20,13 @@ export async function POST(req: Request) {
     return errorResponse(415, 'unsupported content type');
   }
 
+  // Content-Length is only a fast-path: reject early when a client is
+  // honest about an oversized body, without opening the stream. Its absence
+  // (e.g. chunked transfer encoding, which never sends this header) is not
+  // itself grounds for rejection — readBodyWithLimit below enforces the same
+  // cap against the real bytes regardless of what any header claims.
   const contentLength = req.headers.get('content-length');
-  if (!contentLength || Number(contentLength) > MAX_BODY_BYTES) {
+  if (contentLength && Number(contentLength) > MAX_BODY_BYTES) {
     return errorResponse(413, 'payload too large');
   }
 
@@ -55,7 +60,7 @@ export async function POST(req: Request) {
 
   const ip = getClientIp(req);
   try {
-    const { success, reset } = await secretRatelimit.limit(ip);
+    const { success, reset } = await secretWriteRatelimit.limit(ip);
     if (!success) {
       const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
       return errorResponse(429, 'rate limit exceeded', {
@@ -78,11 +83,6 @@ export async function POST(req: Request) {
   const payload = validateSecretPayload(parsedBody);
   if (!payload) {
     return errorResponse(400, 'invalid request');
-  }
-
-  const origin = req.headers.get('origin');
-  if (origin && origin !== new URL(req.url).origin) {
-    return errorResponse(403, 'forbidden');
   }
 
   const id = crypto.randomUUID();

@@ -4,8 +4,8 @@ import { Redis } from "@upstash/redis";
 const redis = Redis.fromEnv();
 
 // Fixed by the AES-GCM/PBKDF2 scheme in lib/crypto.ts: 12-byte IVs, 16-byte salt.
-const IV_B64_LEN = 16; // base64(12 bytes), no padding
-const SALT_B64_LEN = 24; // base64(16 bytes), with "==" padding
+export const IV_B64_LEN = 16; // base64(12 bytes), no padding
+export const SALT_B64_LEN = 24; // base64(16 bytes), with "==" padding
 
 // Ceiling on the one variable-length field: how much plaintext a secret may
 // contain before encryption. 32KB comfortably covers real-world pasted
@@ -13,7 +13,7 @@ const SALT_B64_LEN = 24; // base64(16 bytes), with "==" padding
 // unbounded.
 const MAX_SECRET_PLAINTEXT_BYTES = 32 * 1024;
 const GCM_TAG_BYTES = 16;
-const MAX_CIPHERTEXT_B64_LEN =
+export const MAX_CIPHERTEXT_B64_LEN =
   Math.ceil((MAX_SECRET_PLAINTEXT_BYTES + GCM_TAG_BYTES) / 3) * 4;
 
 // Total request body ceiling: the four fields' max sizes plus JSON
@@ -23,16 +23,65 @@ export const MAX_BODY_BYTES = 48 * 1024;
 const BASE64_RE =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})$/;
 
-export const secretRatelimit = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(5, "60 s"),
-  prefix: "ratelimit:secret",
-});
+// String length alone doesn't pin down decoded byte length once padding is
+// involved (an 11-byte value pads out to the same 16 characters as a real
+// 12-byte IV), so the two fixed-size fields get exact-shape regexes instead
+// of a length check: 12 bytes never pads, 16 bytes always pads with "==".
+const IV_B64_RE = /^[A-Za-z0-9+/]{16}$/;
+const SALT_B64_RE = /^[A-Za-z0-9+/]{22}==$/;
 
+function createIpRatelimit(
+  prefix: string,
+  tokens: number,
+  window: Parameters<typeof Ratelimit.slidingWindow>[1]
+) {
+  return new Ratelimit({
+    redis,
+    limiter: Ratelimit.slidingWindow(tokens, window),
+    prefix,
+  });
+}
+
+export const secretWriteRatelimit = createIpRatelimit(
+  "ratelimit:secret:write",
+  5,
+  "60 s"
+);
+// Reads have no size/compute cost to bound, but still cost a Redis command
+// per hit (including hits on nonexistent ids) so still need a ceiling; a
+// higher budget than writes since a legitimate viewer may load/retry a link.
+export const secretReadRatelimit = createIpRatelimit(
+  "ratelimit:secret:read",
+  20,
+  "60 s"
+);
+
+/**
+ * Only safe as an identity key if whatever sits directly in front of this
+ * app overwrites (or strips-then-sets) x-forwarded-for from the real TCP
+ * peer, rather than passing through a client-supplied value. True on
+ * Vercel's edge today.
+ *
+ * TODO: revisit if this app is ever self-hosted, or if anything (a CDN, a
+ * WAF, a reverse proxy) is ever placed in front of Vercel's own edge —
+ * either can let a client-supplied header through unsanitized, letting a
+ * client send a different X-Forwarded-For value on every request and fully
+ * defeat the rate limiters above (not just misattribute them). Revisit
+ * before that happens, not after.
+ */
 export function getClientIp(req: Request): string {
   const forwardedFor = req.headers.get("x-forwarded-for");
   if (forwardedFor) return forwardedFor.split(",")[0].trim();
   return req.headers.get("x-real-ip") ?? "unknown";
+}
+
+// Matches crypto.randomUUID() output exactly (lowercase v4) — anything else
+// was never a key we issued, so reject before spending a Redis round trip.
+const SECRET_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+export function isValidSecretId(id: string): boolean {
+  return SECRET_ID_RE.test(id);
 }
 
 /**
@@ -100,11 +149,7 @@ export function validateSecretPayload(body: unknown): SecretPayload | null {
     return null;
   }
 
-  if (
-    typeof urlIv !== "string" ||
-    urlIv.length !== IV_B64_LEN ||
-    !BASE64_RE.test(urlIv)
-  ) {
+  if (typeof urlIv !== "string" || !IV_B64_RE.test(urlIv)) {
     return null;
   }
 
@@ -115,11 +160,9 @@ export function validateSecretPayload(body: unknown): SecretPayload | null {
   if (hasPwdSalt) {
     if (
       typeof pwdSalt !== "string" ||
-      pwdSalt.length !== SALT_B64_LEN ||
-      !BASE64_RE.test(pwdSalt) ||
+      !SALT_B64_RE.test(pwdSalt) ||
       typeof pwdIv !== "string" ||
-      pwdIv.length !== IV_B64_LEN ||
-      !BASE64_RE.test(pwdIv)
+      !IV_B64_RE.test(pwdIv)
     ) {
       return null;
     }
