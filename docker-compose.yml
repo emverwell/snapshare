@@ -2,6 +2,11 @@ services:
   redis:
     image: redis:alpine
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
 
   # Upstash's client speaks its REST API over HTTP, not the native Redis
   # protocol, so plain `redis` above isn't reachable from the app directly.
@@ -14,7 +19,16 @@ services:
       SRH_TOKEN: local-dev-token
       SRH_CONNECTION_STRING: "redis://redis:6379"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # 127.0.0.1, not localhost: this image's busybox wget resolves
+      # "localhost" to ::1 first and fails to connect even once the server
+      # is listening on 0.0.0.0.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
 
   app:
     build: .
@@ -28,4 +42,5 @@ services:
       UPSTASH_REDIS_REST_URL: "http://srh:80"
       UPSTASH_REDIS_REST_TOKEN: "local-dev-token"
     depends_on:
-      - srh
+      srh:
+        condition: service_healthy
