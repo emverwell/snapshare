@@ -1,0 +1,31 @@
+services:
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+
+  # Upstash's client speaks its REST API over HTTP, not the native Redis
+  # protocol, so plain `redis` above isn't reachable from the app directly.
+  # This proxies the REST API onto the real Redis instance for local dev.
+  srh:
+    image: hiett/serverless-redis-http:latest
+    restart: unless-stopped
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: local-dev-token
+      SRH_CONNECTION_STRING: "redis://redis:6379"
+    depends_on:
+      - redis
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      # Local-only dummy credentials pointed at the srh shim, deliberately
+      # not .env.local — a containerized run should never be able to reach
+      # a real Upstash database.
+      UPSTASH_REDIS_REST_URL: "http://srh:80"
+      UPSTASH_REDIS_REST_TOKEN: "local-dev-token"
+    depends_on:
+      - srh
