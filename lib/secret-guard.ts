@@ -1,7 +1,37 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
+import { NextResponse } from "next/server";
 
 const redis = Redis.fromEnv();
+
+export function errorResponse(
+  status: number,
+  error: string,
+  headers?: HeadersInit
+) {
+  return NextResponse.json({ error }, { status, headers });
+}
+
+// Real browser traffic always sends Origin on POST/PUT/DELETE/PATCH, same-
+// origin or not — only non-browser callers omit it, so requiring it (rather
+// than only checking it when present) is what makes this filter anything
+// instead of only the traffic least likely to be hostile. Compared against
+// the Host header, not a same-origin URL reconstructed from req.url: under
+// a standalone server (this app's Docker image), req.url is built from the
+// server's own bind address/port (HOSTNAME/PORT env vars), not the client-
+// visible host, so it never matches a real Origin — Host is what the client
+// actually connected to regardless of how the process is bound internally.
+export function isSameOrigin(req: Request): boolean {
+  const origin = req.headers.get("origin");
+  const host = req.headers.get("host");
+  let originHost: string | null = null;
+  try {
+    originHost = origin ? new URL(origin).host : null;
+  } catch {
+    originHost = null;
+  }
+  return !!originHost && !!host && originHost === host;
+}
 
 // Fixed by the AES-GCM/PBKDF2 scheme in lib/crypto.ts: 12-byte IVs, 16-byte salt.
 export const IV_B64_LEN = 16; // base64(12 bytes), no padding

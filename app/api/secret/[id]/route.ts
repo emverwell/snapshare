@@ -1,16 +1,13 @@
 import { Redis } from '@upstash/redis';
 import { NextResponse, NextRequest } from 'next/server';
 import {
+  errorResponse,
   getClientIp,
   isValidSecretId,
   secretReadRatelimit,
 } from '@/lib/secret-guard';
 
 const redis = Redis.fromEnv();
-
-function errorResponse(status: number, error: string, headers?: HeadersInit) {
-  return NextResponse.json({ error }, { status, headers });
-}
 
 export async function GET(
   req: NextRequest,
