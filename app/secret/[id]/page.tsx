@@ -4,10 +4,19 @@
 import { use, useEffect, useState } from "react";
 import { decryptSecret } from "@/lib/crypto";
 
-export default function ViewSecret({ 
-  params: paramsPromise 
-}: { 
-  params: Promise<{ id: string }> 
+type SecretResponsePayload = {
+  ciphertext: string;
+  urlIv: string;
+  pwdSalt?: string;
+  pwdIv?: string;
+};
+
+type EncryptedPayload = SecretResponsePayload & { base64Key: string };
+
+export default function ViewSecret({
+  params: paramsPromise
+}: {
+  params: Promise<{ id: string }>
 }) {
   // 1. Unwrap the params Promise using React.use()
   const params = use(paramsPromise);
@@ -16,7 +25,31 @@ export default function ViewSecret({
   const [error, setError] = useState<string | null>(null);
   const [needsPassword, setNeedsPassword] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
-  const [encryptedPayload, setEncryptedPayload] = useState<any>(null);
+  const [encryptedPayload, setEncryptedPayload] = useState<EncryptedPayload | null>(null);
+
+  const attemptDecryption = async (payload: SecretResponsePayload, key: string, pwd?: string) => {
+    try {
+      const plaintext = await decryptSecret(
+        payload.ciphertext,
+        key,
+        payload.urlIv,
+        pwd,
+        payload.pwdSalt,
+        payload.pwdIv
+      );
+      setSecret(plaintext);
+      setNeedsPassword(false);
+      setError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : undefined;
+      if (message === "PASSWORD_REQUIRED" || payload.pwdSalt) {
+        setNeedsPassword(true);
+        if (pwd) setError("Incorrect password.");
+      } else {
+        setError("Failed to decrypt. Link may be invalid.");
+      }
+    }
+  };
 
   useEffect(() => {
     async function fetchPayload() {
@@ -27,37 +60,14 @@ export default function ViewSecret({
       // Fetch ciphertext using unwrapped params.id
       const res = await fetch(`/api/secret/${params.id}`);
       if (!res.ok) return setError("Secret burned or not found.");
-      
-      const payload = await res.json();
+
+      const payload: SecretResponsePayload = await res.json();
       setEncryptedPayload({ ...payload, base64Key });
-      
+
       attemptDecryption(payload, base64Key);
     }
     fetchPayload();
   }, [params.id]);
-
-  const attemptDecryption = async (payload: any, key: string, pwd?: string) => {
-    try {
-      const plaintext = await decryptSecret(
-        payload.ciphertext, 
-        key, 
-        payload.urlIv, 
-        pwd, 
-        payload.pwdSalt, 
-        payload.pwdIv
-      );
-      setSecret(plaintext);
-      setNeedsPassword(false);
-      setError(null);
-    } catch (err: any) {
-      if (err.message === "PASSWORD_REQUIRED" || payload.pwdSalt) {
-        setNeedsPassword(true);
-        if (pwd) setError("Incorrect password.");
-      } else {
-        setError("Failed to decrypt. Link may be invalid.");
-      }
-    }
-  };
 
   if (error && !needsPassword) return <div className="text-red-500 p-4">{error}</div>;
   
@@ -73,7 +83,7 @@ export default function ViewSecret({
           className="w-full p-2 border rounded bg-transparent border-gray-700 text-white"
         />
         <button 
-          onClick={() => attemptDecryption(encryptedPayload, encryptedPayload.base64Key, passwordInput)}
+          onClick={() => encryptedPayload && attemptDecryption(encryptedPayload, encryptedPayload.base64Key, passwordInput)}
           className="w-full py-2 bg-blue-600 hover:bg-blue-700 font-semibold rounded text-white"
         >
           Decrypt Secret
