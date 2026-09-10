@@ -101,6 +101,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: docker-build-and-scan
     if: github.event_name == 'pull_request'
+    # Needed for the PR-comment step (github.rest.issues.createComment);
+    # without an explicit grant this job inherits whatever the repo/org
+    # default GITHUB_TOKEN permissions are, which can be read-only.
+    permissions:
+      pull-requests: write
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -120,14 +125,20 @@ jobs:
         id: deploy
         run: |
           url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
-          echo "preview_url=$url" >> "$GITHUB_OUTPUT"
+          {
+            echo "preview_url<<EOF"
+            echo "$url"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: Comment preview URL on PR
         uses: actions/github-script@v9
+        env:
+          PREVIEW_URL: ${{ steps.deploy.outputs.preview_url }}
         with:
           script: |
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `Preview deployment: ${{ steps.deploy.outputs.preview_url }}`
+              body: `Preview deployment: ${process.env.PREVIEW_URL}`
             })
