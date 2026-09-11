@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MAX_CIPHERTEXT_B64_LEN,
   IV_B64_LEN,
@@ -206,5 +206,47 @@ describe("readBodyWithLimit", () => {
   it("returns null when there is no body stream", async () => {
     const req = new Request("http://localhost/");
     expect(await readBodyWithLimit(req, 10)).toBeNull();
+  });
+});
+
+describe("getRedis (lazy client construction)", () => {
+  const originalUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const originalToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+  afterEach(() => {
+    process.env.UPSTASH_REDIS_REST_URL = originalUrl;
+    process.env.UPSTASH_REDIS_REST_TOKEN = originalToken;
+    vi.resetModules();
+  });
+
+  it("importing the module does not construct the client, even with an invalid URL", async () => {
+    vi.resetModules();
+    process.env.UPSTASH_REDIS_REST_URL = "not-a-valid-url";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "test-token";
+
+    // Regression test for a real prod incident: Redis.fromEnv() used to run
+    // at module scope, so merely importing this file crashed on a bad env
+    // var — including during Next's build-time config-collection pass,
+    // which imports route modules without necessarily having a real runtime
+    // env available yet.
+    await expect(import("./secret-guard")).resolves.toBeDefined();
+  });
+
+  it("still throws on first real use if the URL is invalid", async () => {
+    vi.resetModules();
+    process.env.UPSTASH_REDIS_REST_URL = "not-a-valid-url";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "test-token";
+
+    const mod = await import("./secret-guard");
+    expect(() => mod.getRedis()).toThrow();
+  });
+
+  it("reuses the same client instance across repeated calls", async () => {
+    vi.resetModules();
+    process.env.UPSTASH_REDIS_REST_URL = "https://example.upstash.io";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "test-token";
+
+    const mod = await import("./secret-guard");
+    expect(mod.getRedis()).toBe(mod.getRedis());
   });
 });

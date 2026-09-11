@@ -1,13 +1,11 @@
-import { Redis } from '@upstash/redis';
 import { NextResponse, NextRequest } from 'next/server';
 import {
   errorResponse,
   getClientIp,
+  getRedis,
   isValidSecretId,
   secretReadRatelimit,
 } from '@/lib/secret-guard';
-
-const redis = Redis.fromEnv();
 
 export async function GET(
   req: NextRequest,
@@ -36,7 +34,7 @@ export async function GET(
   }
 
   // Fetch and immediately delete the secret
-  const data = await redis.getdel(`secret:${id}`);
+  const data = await getRedis().getdel(`secret:${id}`);
 
   if (!data) {
     return errorResponse(404, 'Secret not found or already burned');

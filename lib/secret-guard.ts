@@ -2,7 +2,19 @@ import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import { NextResponse } from "next/server";
 
-const redis = Redis.fromEnv();
+// Constructed on first use, not at import time: Redis.fromEnv() throws
+// synchronously on a missing/invalid URL, and building it at module scope
+// means merely *importing* this file — during a build's config-collection
+// pass, a test run, or any other context that loads the module without a
+// real request — crashes on env var contents it doesn't actually need yet.
+let redisClient: Redis | undefined;
+
+export function getRedis(): Redis {
+  if (!redisClient) {
+    redisClient = Redis.fromEnv();
+  }
+  return redisClient;
+}
 
 export function errorResponse(
   status: number,
@@ -60,16 +72,29 @@ const BASE64_RE =
 const IV_B64_RE = /^[A-Za-z0-9+/]{16}$/;
 const SALT_B64_RE = /^[A-Za-z0-9+/]{22}==$/;
 
+// secretWriteRatelimit/secretReadRatelimit below are constructed at module
+// scope, so the real Ratelimit instance (and the getRedis() call inside it)
+// stays lazy too — otherwise wrapping just Redis.fromEnv() in a getter
+// wouldn't help, since creating the Ratelimit immediately would force it on
+// import anyway.
 function createIpRatelimit(
   prefix: string,
   tokens: number,
   window: Parameters<typeof Ratelimit.slidingWindow>[1]
 ) {
-  return new Ratelimit({
-    redis,
-    limiter: Ratelimit.slidingWindow(tokens, window),
-    prefix,
-  });
+  let limiter: Ratelimit | undefined;
+  return {
+    limit: (identifier: string) => {
+      if (!limiter) {
+        limiter = new Ratelimit({
+          redis: getRedis(),
+          limiter: Ratelimit.slidingWindow(tokens, window),
+          prefix,
+        });
+      }
+      return limiter.limit(identifier);
+    },
+  };
 }
 
 export const secretWriteRatelimit = createIpRatelimit(
