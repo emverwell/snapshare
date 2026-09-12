@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  # Keeps action version tags current — including the SHA-pinned Trivy
+  # action (ci.yml), which Dependabot updates correctly alongside its
+  # version comment.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Separate ecosystem from "docker" above — covers the image tags in
+  # docker-compose.yml (redis, otel-collector, prometheus, grafana), not
+  # just the Dockerfile.
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"

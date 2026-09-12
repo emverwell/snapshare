@@ -20,7 +20,7 @@ export async function derivePasswordKey(password: string, salt: ArrayBuffer) {
     false,
     ["deriveKey"]
   );
-  
+
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
@@ -35,87 +35,110 @@ export async function derivePasswordKey(password: string, salt: ArrayBuffer) {
   );
 }
 
-export async function encryptSecret(text: string, password?: string) {
-  let dataToEncrypt: ArrayBuffer = new TextEncoder().encode(text).buffer as ArrayBuffer;
-  let pwdSaltBuffer: ArrayBuffer | undefined;
-  let pwdIvBuffer: ArrayBuffer | undefined;
+export type EncryptResult =
+  | {
+      mode: "url-key";
+      base64Ciphertext: string;
+      base64UrlKey: string;
+      base64UrlIv: string;
+    }
+  | {
+      mode: "passphrase";
+      base64Ciphertext: string;
+      base64PwdSalt: string;
+      base64PwdIv: string;
+    };
+
+// A passphrase *replaces* the URL key rather than adding a layer on top of
+// it: with a passphrase, the passphrase-derived key is the only key that
+// ever exists, and it never travels in the URL — the link alone can't
+// decrypt it. That's the point (safer against chat apps/link previewers
+// that strip URL fragments), not an incidental side effect, so the two
+// modes are mutually exclusive rather than stacked.
+export async function encryptSecret(
+  text: string,
+  password?: string
+): Promise<EncryptResult> {
+  const plaintext = new TextEncoder().encode(text).buffer as ArrayBuffer;
 
   if (password) {
     const saltArray = crypto.getRandomValues(new Uint8Array(16));
     const ivArray = crypto.getRandomValues(new Uint8Array(12));
-    
-    pwdSaltBuffer = saltArray.buffer as ArrayBuffer;
-    pwdIvBuffer = ivArray.buffer as ArrayBuffer;
+    const pwdSaltBuffer = saltArray.buffer as ArrayBuffer;
+    const pwdIvBuffer = ivArray.buffer as ArrayBuffer;
 
     const pwdKey = await derivePasswordKey(password, pwdSaltBuffer);
-    
-    dataToEncrypt = await crypto.subtle.encrypt(
+    const ciphertext = await crypto.subtle.encrypt(
       { name: "AES-GCM", iv: pwdIvBuffer },
       pwdKey,
-      dataToEncrypt
+      plaintext
     );
+
+    return {
+      mode: "passphrase",
+      base64Ciphertext: bufferToBase64(ciphertext),
+      base64PwdSalt: bufferToBase64(pwdSaltBuffer),
+      base64PwdIv: bufferToBase64(pwdIvBuffer),
+    };
   }
 
   const urlKey = await crypto.subtle.generateKey(
-    { name: "AES-GCM", length: 256 }, 
-    true, 
+    { name: "AES-GCM", length: 256 },
+    true,
     ["encrypt", "decrypt"]
   );
-  
   const urlIvArray = crypto.getRandomValues(new Uint8Array(12));
   const urlIvBuffer = urlIvArray.buffer as ArrayBuffer;
 
-  const outerCiphertext = await crypto.subtle.encrypt(
+  const ciphertext = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv: urlIvBuffer },
     urlKey,
-    dataToEncrypt
+    plaintext
   );
-
   const exportedUrlKey = await crypto.subtle.exportKey("raw", urlKey);
 
   return {
+    mode: "url-key",
+    base64Ciphertext: bufferToBase64(ciphertext),
     base64UrlKey: bufferToBase64(exportedUrlKey),
     base64UrlIv: bufferToBase64(urlIvBuffer),
-    base64Ciphertext: bufferToBase64(outerCiphertext),
-    base64PwdSalt: pwdSaltBuffer ? bufferToBase64(pwdSaltBuffer) : undefined,
-    base64PwdIv: pwdIvBuffer ? bufferToBase64(pwdIvBuffer) : undefined,
   };
 }
 
-export async function decryptSecret(
-  base64Ciphertext: string, 
-  base64UrlKey: string, 
-  base64UrlIv: string,
-  password?: string,
-  base64PwdSalt?: string,
-  base64PwdIv?: string
-) {
-  const urlKey = await crypto.subtle.importKey(
-    "raw", 
-    base64ToBuffer(base64UrlKey), 
-    "AES-GCM", 
-    true, 
-    ["decrypt"]
-  );
-  
-  let decryptedData = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: base64ToBuffer(base64UrlIv) },
-    urlKey,
-    base64ToBuffer(base64Ciphertext)
-  );
+export type DecryptInput =
+  | { base64Ciphertext: string; urlIv: string; base64UrlKey: string }
+  | {
+      base64Ciphertext: string;
+      pwdSalt: string;
+      pwdIv: string;
+      password: string;
+    };
 
-  if (base64PwdSalt && base64PwdIv) {
-    if (!password) throw new Error("PASSWORD_REQUIRED");
-    
-    const pwdSaltBuffer = base64ToBuffer(base64PwdSalt);
-    const pwdKey = await derivePasswordKey(password, pwdSaltBuffer);
-    
-    decryptedData = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: base64ToBuffer(base64PwdIv) },
-      pwdKey,
-      decryptedData
+export async function decryptSecret(input: DecryptInput): Promise<string> {
+  if ("pwdSalt" in input) {
+    const pwdKey = await derivePasswordKey(
+      input.password,
+      base64ToBuffer(input.pwdSalt)
     );
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: base64ToBuffer(input.pwdIv) },
+      pwdKey,
+      base64ToBuffer(input.base64Ciphertext)
+    );
+    return new TextDecoder().decode(decrypted);
   }
 
-  return new TextDecoder().decode(decryptedData);
+  const urlKey = await crypto.subtle.importKey(
+    "raw",
+    base64ToBuffer(input.base64UrlKey),
+    "AES-GCM",
+    true,
+    ["decrypt"]
+  );
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBuffer(input.urlIv) },
+    urlKey,
+    base64ToBuffer(input.base64Ciphertext)
+  );
+  return new TextDecoder().decode(decrypted);
 }

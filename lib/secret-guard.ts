@@ -1,8 +1,25 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import { NextResponse } from "next/server";
+import {
+  MAX_SECRET_PLAINTEXT_BYTES,
+  isAllowedLifetime,
+  type LifetimeSeconds,
+} from "@/lib/secret-limits";
 
-const redis = Redis.fromEnv();
+// Constructed on first use, not at import time: Redis.fromEnv() throws
+// synchronously on a missing/invalid URL, and building it at module scope
+// means merely *importing* this file — during a build's config-collection
+// pass, a test run, or any other context that loads the module without a
+// real request — crashes on env var contents it doesn't actually need yet.
+let redisClient: Redis | undefined;
+
+export function getRedis(): Redis {
+  if (!redisClient) {
+    redisClient = Redis.fromEnv();
+  }
+  return redisClient;
+}
 
 export function errorResponse(
   status: number,
@@ -38,10 +55,8 @@ export const IV_B64_LEN = 16; // base64(12 bytes), no padding
 export const SALT_B64_LEN = 24; // base64(16 bytes), with "==" padding
 
 // Ceiling on the one variable-length field: how much plaintext a secret may
-// contain before encryption. 32KB comfortably covers real-world pasted
-// secrets (SSH keys, service-account JSON, kubeconfigs) without being
-// unbounded.
-const MAX_SECRET_PLAINTEXT_BYTES = 32 * 1024;
+// contain before encryption. Shared with the client (lib/secret-limits.ts)
+// for the live character counter.
 const GCM_TAG_BYTES = 16;
 export const MAX_CIPHERTEXT_B64_LEN =
   Math.ceil((MAX_SECRET_PLAINTEXT_BYTES + GCM_TAG_BYTES) / 3) * 4;
@@ -60,16 +75,29 @@ const BASE64_RE =
 const IV_B64_RE = /^[A-Za-z0-9+/]{16}$/;
 const SALT_B64_RE = /^[A-Za-z0-9+/]{22}==$/;
 
+// secretWriteRatelimit/secretReadRatelimit below are constructed at module
+// scope, so the real Ratelimit instance (and the getRedis() call inside it)
+// stays lazy too — otherwise wrapping just Redis.fromEnv() in a getter
+// wouldn't help, since creating the Ratelimit immediately would force it on
+// import anyway.
 function createIpRatelimit(
   prefix: string,
   tokens: number,
   window: Parameters<typeof Ratelimit.slidingWindow>[1]
 ) {
-  return new Ratelimit({
-    redis,
-    limiter: Ratelimit.slidingWindow(tokens, window),
-    prefix,
-  });
+  let limiter: Ratelimit | undefined;
+  return {
+    limit: (identifier: string) => {
+      if (!limiter) {
+        limiter = new Ratelimit({
+          redis: getRedis(),
+          limiter: Ratelimit.slidingWindow(tokens, window),
+          prefix,
+        });
+      }
+      return limiter.limit(identifier);
+    },
+  };
 }
 
 export const secretWriteRatelimit = createIpRatelimit(
@@ -149,14 +177,27 @@ export async function readBodyWithLimit(
   return new TextDecoder().decode(buffer);
 }
 
+// urlIv and pwdSalt/pwdIv are mutually exclusive, not "urlIv always plus an
+// optional password layer on top": a passphrase *replaces* the URL key
+// rather than adding to it, so the link carries no key at all when one is
+// set (see lib/crypto.ts).
 export type SecretPayload = {
   ciphertext: string;
-  urlIv: string;
-  pwdSalt?: string;
-  pwdIv?: string;
-};
+  lifetimeSeconds: LifetimeSeconds;
+  burnAfterReading: boolean;
+} & (
+  | { urlIv: string; pwdSalt?: undefined; pwdIv?: undefined }
+  | { urlIv?: undefined; pwdSalt: string; pwdIv: string }
+);
 
-const ALLOWED_KEYS = new Set(["ciphertext", "urlIv", "pwdSalt", "pwdIv"]);
+const ALLOWED_KEYS = new Set([
+  "ciphertext",
+  "urlIv",
+  "pwdSalt",
+  "pwdIv",
+  "lifetimeSeconds",
+  "burnAfterReading",
+]);
 
 export function validateSecretPayload(body: unknown): SecretPayload | null {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
@@ -168,7 +209,8 @@ export function validateSecretPayload(body: unknown): SecretPayload | null {
     return null;
   }
 
-  const { ciphertext, urlIv, pwdSalt, pwdIv } = record;
+  const { ciphertext, urlIv, pwdSalt, pwdIv, lifetimeSeconds, burnAfterReading } =
+    record;
 
   if (
     typeof ciphertext !== "string" ||
@@ -179,29 +221,37 @@ export function validateSecretPayload(body: unknown): SecretPayload | null {
     return null;
   }
 
-  if (typeof urlIv !== "string" || !IV_B64_RE.test(urlIv)) {
+  if (!isAllowedLifetime(lifetimeSeconds)) {
     return null;
   }
 
-  const hasPwdSalt = pwdSalt !== undefined;
-  const hasPwdIv = pwdIv !== undefined;
-  if (hasPwdSalt !== hasPwdIv) return null;
-
-  if (hasPwdSalt) {
-    if (
-      typeof pwdSalt !== "string" ||
-      !SALT_B64_RE.test(pwdSalt) ||
-      typeof pwdIv !== "string" ||
-      !IV_B64_RE.test(pwdIv)
-    ) {
-      return null;
-    }
+  if (typeof burnAfterReading !== "boolean") {
+    return null;
   }
 
-  return {
-    ciphertext,
-    urlIv,
-    pwdSalt: pwdSalt as string | undefined,
-    pwdIv: pwdIv as string | undefined,
-  };
+  const hasUrlIv = urlIv !== undefined;
+  const hasPwdSalt = pwdSalt !== undefined;
+  const hasPwdIv = pwdIv !== undefined;
+
+  // Exactly one mode: key-in-url (urlIv only) or passphrase-only (pwdSalt +
+  // pwdIv together, no urlIv) — never both, never neither.
+  if (hasPwdSalt !== hasPwdIv) return null;
+  if (hasUrlIv === hasPwdSalt) return null;
+
+  if (hasUrlIv) {
+    if (typeof urlIv !== "string" || !IV_B64_RE.test(urlIv)) {
+      return null;
+    }
+    return { ciphertext, urlIv, lifetimeSeconds, burnAfterReading };
+  }
+
+  if (
+    typeof pwdSalt !== "string" ||
+    !SALT_B64_RE.test(pwdSalt) ||
+    typeof pwdIv !== "string" ||
+    !IV_B64_RE.test(pwdIv)
+  ) {
+    return null;
+  }
+  return { ciphertext, pwdSalt, pwdIv, lifetimeSeconds, burnAfterReading };
 }

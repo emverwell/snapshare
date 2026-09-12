@@ -1,13 +1,11 @@
-import { Redis } from '@upstash/redis';
 import { NextResponse, NextRequest } from 'next/server';
 import {
   errorResponse,
   getClientIp,
+  getRedis,
   isValidSecretId,
   secretReadRatelimit,
 } from '@/lib/secret-guard';
-
-const redis = Redis.fromEnv();
 
 export async function GET(
   req: NextRequest,
@@ -35,11 +33,25 @@ export async function GET(
     });
   }
 
-  // Fetch and immediately delete the secret
-  const data = await redis.getdel(`secret:${id}`);
+  // Whether to delete now depends on a flag stored *inside* the value, so
+  // it can't be known without reading first — this can no longer be one
+  // atomic getdel. Deliberate accepted trade-off: two truly simultaneous
+  // reads of a burn-after-reading secret could both land before the delete
+  // below completes (today's getdel had zero such window). Not fixing this
+  // with a Lua script: anyone racing this already has the link and full
+  // read access — the one-time guarantee is about limiting exposure, not
+  // defending against a reader racing themselves.
+  const data = await getRedis().get<{ burnAfterReading: boolean }>(
+    `secret:${id}`
+  );
 
   if (!data) {
     return errorResponse(404, 'Secret not found or already burned');
   }
+
+  if (data.burnAfterReading) {
+    await getRedis().del(`secret:${id}`);
+  }
+
   return NextResponse.json(data);
 }
