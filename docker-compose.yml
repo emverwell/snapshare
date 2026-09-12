@@ -41,6 +41,10 @@ services:
       # a real Upstash database.
       UPSTASH_REDIS_REST_URL: "http://srh:80"
       UPSTASH_REDIS_REST_TOKEN: "local-dev-token"
+      # Harmless when the observability profile isn't running: the OTel SDK
+      # just fails to export silently (no listener), same as any other
+      # unset/unreachable OTLP target.
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
     depends_on:
       srh:
         condition: service_healthy
@@ -52,3 +56,39 @@ services:
       interval: 2s
       timeout: 2s
       retries: 15
+
+  # Local-only demo backend for the OTel data the app already emits — not a
+  # production dependency, and not required for the app/redis/srh stack
+  # above. Off by default; start explicitly with:
+  #   docker compose --profile observability up
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    restart: unless-stopped
+    profiles: ["observability"]
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    restart: unless-stopped
+    profiles: ["observability"]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - otel-collector
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    profiles: ["observability"]
+    ports:
+      - "3001:3000"
+    environment:
+      # Local demo only: skip login for a zero-friction `open localhost:3001`.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
