@@ -64,11 +64,12 @@ export async function POST(req: Request) {
 
   const id = crypto.randomUUID();
 
-  await getRedis().setex(`secret:${id}`, 86400, {
+  await getRedis().setex(`secret:${id}`, payload.lifetimeSeconds, {
     ciphertext: payload.ciphertext,
-    urlIv: payload.urlIv,
-    pwdSalt: payload.pwdSalt, // Will be undefined if no password was used
+    urlIv: payload.urlIv, // undefined in passphrase mode
+    pwdSalt: payload.pwdSalt, // undefined in url-key mode
     pwdIv: payload.pwdIv,
+    burnAfterReading: payload.burnAfterReading,
   });
 
   return NextResponse.json({ id });

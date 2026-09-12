@@ -17,21 +17,56 @@ const urlIv = b64(12); // IV_B64_LEN chars, no padding
 const pwdSalt = b64(16); // SALT_B64_LEN chars, "==" padding
 const pwdIv = b64(12);
 const ciphertext = b64(48); // arbitrary small valid ciphertext
+const lifetimeSeconds = 86400;
+const burnAfterReading = true;
 
 describe("validateSecretPayload", () => {
-  it("accepts a minimal valid payload (no password)", () => {
-    const result = validateSecretPayload({ ciphertext, urlIv });
-    expect(result).toEqual({
+  it("accepts a valid url-key-mode payload", () => {
+    const result = validateSecretPayload({
       ciphertext,
       urlIv,
-      pwdSalt: undefined,
-      pwdIv: undefined,
+      lifetimeSeconds,
+      burnAfterReading,
+    });
+    expect(result).toEqual({ ciphertext, urlIv, lifetimeSeconds, burnAfterReading });
+  });
+
+  it("accepts a valid passphrase-mode payload", () => {
+    const result = validateSecretPayload({
+      ciphertext,
+      pwdSalt,
+      pwdIv,
+      lifetimeSeconds,
+      burnAfterReading,
+    });
+    expect(result).toEqual({
+      ciphertext,
+      pwdSalt,
+      pwdIv,
+      lifetimeSeconds,
+      burnAfterReading,
     });
   });
 
-  it("accepts a valid payload with a paired password salt/iv", () => {
-    const result = validateSecretPayload({ ciphertext, urlIv, pwdSalt, pwdIv });
-    expect(result).toEqual({ ciphertext, urlIv, pwdSalt, pwdIv });
+  it("rejects both urlIv and pwdSalt/pwdIv present together", () => {
+    // A passphrase replaces the URL key rather than adding to it — the two
+    // modes are mutually exclusive, not stackable.
+    expect(
+      validateSecretPayload({
+        ciphertext,
+        urlIv,
+        pwdSalt,
+        pwdIv,
+        lifetimeSeconds,
+        burnAfterReading,
+      })
+    ).toBeNull();
+  });
+
+  it("rejects neither urlIv nor pwdSalt/pwdIv present", () => {
+    expect(
+      validateSecretPayload({ ciphertext, lifetimeSeconds, burnAfterReading })
+    ).toBeNull();
   });
 
   it.each([null, undefined, "string", 42, ["array"]])(
@@ -43,25 +78,52 @@ describe("validateSecretPayload", () => {
 
   it("rejects an unknown extra key", () => {
     expect(
-      validateSecretPayload({ ciphertext, urlIv, extra: "nope" })
+      validateSecretPayload({
+        ciphertext,
+        urlIv,
+        lifetimeSeconds,
+        burnAfterReading,
+        extra: "nope",
+      })
     ).toBeNull();
   });
 
   it("rejects a missing ciphertext", () => {
-    expect(validateSecretPayload({ urlIv })).toBeNull();
+    expect(
+      validateSecretPayload({ urlIv, lifetimeSeconds, burnAfterReading })
+    ).toBeNull();
   });
 
   it("rejects an empty ciphertext", () => {
-    expect(validateSecretPayload({ ciphertext: "", urlIv })).toBeNull();
+    expect(
+      validateSecretPayload({
+        ciphertext: "",
+        urlIv,
+        lifetimeSeconds,
+        burnAfterReading,
+      })
+    ).toBeNull();
   });
 
   it("rejects a non-string ciphertext", () => {
-    expect(validateSecretPayload({ ciphertext: 12345, urlIv })).toBeNull();
+    expect(
+      validateSecretPayload({
+        ciphertext: 12345,
+        urlIv,
+        lifetimeSeconds,
+        burnAfterReading,
+      })
+    ).toBeNull();
   });
 
   it("rejects ciphertext with invalid base64 characters", () => {
     expect(
-      validateSecretPayload({ ciphertext: "not_base64-url!!", urlIv })
+      validateSecretPayload({
+        ciphertext: "not_base64-url!!",
+        urlIv,
+        lifetimeSeconds,
+        burnAfterReading,
+      })
     ).toBeNull();
   });
 
@@ -71,50 +133,98 @@ describe("validateSecretPayload", () => {
     const maxBytes = (MAX_CIPHERTEXT_B64_LEN / 4) * 3;
     const atMax = b64(maxBytes);
     expect(atMax.length).toBe(MAX_CIPHERTEXT_B64_LEN);
-    expect(validateSecretPayload({ ciphertext: atMax, urlIv })).not.toBeNull();
+    expect(
+      validateSecretPayload({
+        ciphertext: atMax,
+        urlIv,
+        lifetimeSeconds,
+        burnAfterReading,
+      })
+    ).not.toBeNull();
   });
 
   it("rejects ciphertext one base64 group past the max length", () => {
     const maxBytes = (MAX_CIPHERTEXT_B64_LEN / 4) * 3;
     const overMax = b64(maxBytes + 3);
     expect(overMax.length).toBe(MAX_CIPHERTEXT_B64_LEN + 4);
-    expect(validateSecretPayload({ ciphertext: overMax, urlIv })).toBeNull();
-  });
-
-  it("rejects a missing urlIv", () => {
-    expect(validateSecretPayload({ ciphertext })).toBeNull();
+    expect(
+      validateSecretPayload({
+        ciphertext: overMax,
+        urlIv,
+        lifetimeSeconds,
+        burnAfterReading,
+      })
+    ).toBeNull();
   });
 
   it.each([b64(11), b64(13)])(
     "rejects a urlIv of the wrong byte length (%s)",
     (badIv) => {
-      expect(validateSecretPayload({ ciphertext, urlIv: badIv })).toBeNull();
+      expect(
+        validateSecretPayload({
+          ciphertext,
+          urlIv: badIv,
+          lifetimeSeconds,
+          burnAfterReading,
+        })
+      ).toBeNull();
     }
   );
 
   it("rejects a urlIv with invalid base64 characters", () => {
     expect(
-      validateSecretPayload({ ciphertext, urlIv: "!!!!!!!!!!!!!!!!" })
+      validateSecretPayload({
+        ciphertext,
+        urlIv: "!!!!!!!!!!!!!!!!",
+        lifetimeSeconds,
+        burnAfterReading,
+      })
     ).toBeNull();
   });
 
   it("rejects pwdSalt present without pwdIv", () => {
-    expect(validateSecretPayload({ ciphertext, urlIv, pwdSalt })).toBeNull();
+    expect(
+      validateSecretPayload({
+        ciphertext,
+        pwdSalt,
+        lifetimeSeconds,
+        burnAfterReading,
+      })
+    ).toBeNull();
   });
 
   it("rejects pwdIv present without pwdSalt", () => {
-    expect(validateSecretPayload({ ciphertext, urlIv, pwdIv })).toBeNull();
+    expect(
+      validateSecretPayload({
+        ciphertext,
+        pwdIv,
+        lifetimeSeconds,
+        burnAfterReading,
+      })
+    ).toBeNull();
   });
 
   it("rejects a pwdSalt of the wrong byte length", () => {
     expect(
-      validateSecretPayload({ ciphertext, urlIv, pwdSalt: b64(15), pwdIv })
+      validateSecretPayload({
+        ciphertext,
+        pwdSalt: b64(15),
+        pwdIv,
+        lifetimeSeconds,
+        burnAfterReading,
+      })
     ).toBeNull();
   });
 
   it("rejects a pwdIv of the wrong byte length", () => {
     expect(
-      validateSecretPayload({ ciphertext, urlIv, pwdSalt, pwdIv: b64(11) })
+      validateSecretPayload({
+        ciphertext,
+        pwdSalt,
+        pwdIv: b64(11),
+        lifetimeSeconds,
+        burnAfterReading,
+      })
     ).toBeNull();
   });
 
@@ -122,6 +232,54 @@ describe("validateSecretPayload", () => {
     expect(urlIv.length).toBe(IV_B64_LEN);
     expect(pwdSalt.length).toBe(SALT_B64_LEN);
   });
+
+  it.each([0, 1000, 43200, 86401, -86400])(
+    "rejects a lifetimeSeconds outside the allowed set (%p)",
+    (badLifetime) => {
+      expect(
+        validateSecretPayload({
+          ciphertext,
+          urlIv,
+          lifetimeSeconds: badLifetime,
+          burnAfterReading,
+        })
+      ).toBeNull();
+    }
+  );
+
+  it.each([900, 3600, 21600, 86400])(
+    "accepts each allowed lifetimeSeconds value (%p)",
+    (goodLifetime) => {
+      expect(
+        validateSecretPayload({
+          ciphertext,
+          urlIv,
+          lifetimeSeconds: goodLifetime,
+          burnAfterReading,
+        })
+      ).not.toBeNull();
+    }
+  );
+
+  it("rejects a missing burnAfterReading", () => {
+    expect(
+      validateSecretPayload({ ciphertext, urlIv, lifetimeSeconds })
+    ).toBeNull();
+  });
+
+  it.each(["true", 1, 0, null])(
+    "rejects a non-boolean burnAfterReading (%p)",
+    (badValue) => {
+      expect(
+        validateSecretPayload({
+          ciphertext,
+          urlIv,
+          lifetimeSeconds,
+          burnAfterReading: badValue,
+        })
+      ).toBeNull();
+    }
+  );
 });
 
 describe("isValidSecretId", () => {

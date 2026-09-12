@@ -1,106 +1,188 @@
-// app/secret/[id]/page.tsx
 "use client";
 
 import { use, useEffect, useState } from "react";
 import { decryptSecret } from "@/lib/crypto";
+import { useLocale } from "@/lib/i18n/use-locale";
+import { LanguageToggle } from "@/components/LanguageToggle";
+import { EyeIcon, EyeOffIcon } from "@/components/icons";
 
-type SecretResponsePayload = {
+type FetchedPayload = {
   ciphertext: string;
-  urlIv: string;
+  urlIv?: string;
   pwdSalt?: string;
   pwdIv?: string;
+  burnAfterReading: boolean;
 };
 
-type EncryptedPayload = SecretResponsePayload & { base64Key: string };
+type Status =
+  | "loading"
+  | "not-found"
+  | "key-missing"
+  | "needs-passphrase"
+  | "revealed";
 
 export default function ViewSecret({
-  params: paramsPromise
+  params: paramsPromise,
 }: {
-  params: Promise<{ id: string }>
+  params: Promise<{ id: string }>;
 }) {
-  // 1. Unwrap the params Promise using React.use()
-  const params = use(paramsPromise);
+  const { id } = use(paramsPromise);
+  const { locale, setLocale, t } = useLocale();
 
+  const [status, setStatus] = useState<Status>("loading");
+  const [payload, setPayload] = useState<FetchedPayload | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [needsPassword, setNeedsPassword] = useState(false);
-  const [passwordInput, setPasswordInput] = useState("");
-  const [encryptedPayload, setEncryptedPayload] = useState<EncryptedPayload | null>(null);
 
-  const attemptDecryption = async (payload: SecretResponsePayload, key: string, pwd?: string) => {
-    try {
-      const plaintext = await decryptSecret(
-        payload.ciphertext,
-        key,
-        payload.urlIv,
-        pwd,
-        payload.pwdSalt,
-        payload.pwdIv
-      );
-      setSecret(plaintext);
-      setNeedsPassword(false);
-      setError(null);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : undefined;
-      if (message === "PASSWORD_REQUIRED" || payload.pwdSalt) {
-        setNeedsPassword(true);
-        if (pwd) setError("Incorrect password.");
-      } else {
-        setError("Failed to decrypt. Link may be invalid.");
+  const [passphraseInput, setPassphraseInput] = useState("");
+  const [showPassphrase, setShowPassphrase] = useState(false);
+  const [passphraseError, setPassphraseError] = useState<string | null>(null);
+  const [unlocking, setUnlocking] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      const res = await fetch(`/api/secret/${id}`);
+      if (cancelled) return;
+
+      if (!res.ok) {
+        setStatus("not-found");
+        return;
       }
+
+      const data: FetchedPayload = await res.json();
+      setPayload(data);
+
+      if (data.pwdSalt && data.pwdIv) {
+        setStatus("needs-passphrase");
+        return;
+      }
+
+      const base64Key = window.location.hash.slice(1);
+      if (!base64Key || !data.urlIv) {
+        setStatus("key-missing");
+        return;
+      }
+
+      try {
+        const plaintext = await decryptSecret({
+          base64Ciphertext: data.ciphertext,
+          urlIv: data.urlIv,
+          base64UrlKey: base64Key,
+        });
+        if (cancelled) return;
+        setSecret(plaintext);
+        setStatus("revealed");
+      } catch {
+        if (!cancelled) setStatus("key-missing");
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  const handleUnlock = async () => {
+    if (!payload?.pwdSalt || !payload.pwdIv) return;
+    setUnlocking(true);
+    setPassphraseError(null);
+    try {
+      const plaintext = await decryptSecret({
+        base64Ciphertext: payload.ciphertext,
+        pwdSalt: payload.pwdSalt,
+        pwdIv: payload.pwdIv,
+        password: passphraseInput,
+      });
+      setSecret(plaintext);
+      setStatus("revealed");
+    } catch {
+      setPassphraseError(t.view.incorrectPassphrase);
+    } finally {
+      setUnlocking(false);
     }
   };
 
-  useEffect(() => {
-    async function fetchPayload() {
-      // Extract key from URL hash (e.g., domain.com/secret/id#HASH_KEY)
-      const base64Key = window.location.hash.slice(1);
-      if (!base64Key) return setError("Decryption key missing from URL.");
-
-      // Fetch ciphertext using unwrapped params.id
-      const res = await fetch(`/api/secret/${params.id}`);
-      if (!res.ok) return setError("Secret burned or not found.");
-
-      const payload: SecretResponsePayload = await res.json();
-      setEncryptedPayload({ ...payload, base64Key });
-
-      attemptDecryption(payload, base64Key);
-    }
-    fetchPayload();
-  }, [params.id]);
-
-  if (error && !needsPassword) return <div className="text-red-500 p-4">{error}</div>;
-  
-  if (needsPassword && !secret) {
-    return (
-      <div className="p-4 border border-gray-700 rounded max-w-xl mx-auto mt-12 space-y-4">
-        <p className="font-medium">This secret is password protected.</p>
-        <input 
-          type="password" 
-          placeholder="Enter password"
-          value={passwordInput}
-          onChange={(e) => setPasswordInput(e.target.value)}
-          className="w-full p-2 border rounded bg-transparent border-gray-700 text-white"
-        />
-        <button 
-          onClick={() => encryptedPayload && attemptDecryption(encryptedPayload, encryptedPayload.base64Key, passwordInput)}
-          className="w-full py-2 bg-blue-600 hover:bg-blue-700 font-semibold rounded text-white"
-        >
-          Decrypt Secret
-        </button>
-        {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
-      </div>
-    );
-  }
-
-  if (!secret) return <div className="p-4 max-w-xl mx-auto mt-12">Fetching & decrypting...</div>;
-  
   return (
-    <div className="p-4 border border-gray-700 rounded max-w-xl mx-auto mt-12">
-      <h2 className="font-bold text-lg mb-2">Your Secret (Burned from server):</h2>
-      <pre className="p-3 bg-black/50 border border-gray-800 rounded whitespace-pre-wrap break-all text-sm">
-        {secret}
-      </pre>
-    </div>
+    <main className="mx-auto w-full max-w-xl px-6 py-16">
+      <div className="mb-6 flex justify-end">
+        <LanguageToggle locale={locale} onChange={setLocale} />
+      </div>
+
+      <div className="rounded-2xl border border-border bg-card p-6">
+        {status === "loading" && (
+          <p className="text-sm text-muted">{t.view.fetchingMessage}</p>
+        )}
+
+        {status === "not-found" && (
+          <p className="text-sm text-red-400">{t.view.notFoundError}</p>
+        )}
+
+        {status === "key-missing" && (
+          <p className="text-sm text-red-400">{t.view.keyMissingError}</p>
+        )}
+
+        {status === "needs-passphrase" && (
+          <div className="space-y-4">
+            <p className="font-medium">{t.view.passphraseTitle}</p>
+            <div className="relative">
+              <input
+                type={showPassphrase ? "text" : "password"}
+                value={passphraseInput}
+                onChange={(e) => setPassphraseInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleUnlock();
+                  }
+                }}
+                placeholder={t.view.passphraseInputPlaceholder}
+                className="w-full rounded-xl border border-border bg-background p-3 pr-11 text-sm placeholder:text-muted focus:border-muted focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassphrase((v) => !v)}
+                aria-label={
+                  showPassphrase ? t.home.hidePassphrase : t.home.showPassphrase
+                }
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+              >
+                {showPassphrase ? (
+                  <EyeOffIcon className="h-5 w-5" />
+                ) : (
+                  <EyeIcon className="h-5 w-5" />
+                )}
+              </button>
+            </div>
+            {passphraseError && (
+              <p className="text-sm text-red-400">{passphraseError}</p>
+            )}
+            <button
+              type="button"
+              onClick={handleUnlock}
+              disabled={unlocking || passphraseInput.length === 0}
+              className="w-full rounded-xl bg-accent py-3 font-semibold text-accent-foreground transition-opacity disabled:opacity-50"
+            >
+              {unlocking ? t.view.unlockingButton : t.view.unlockButton}
+            </button>
+          </div>
+        )}
+
+        {status === "revealed" && secret !== null && (
+          <div className="space-y-4">
+            <p className="font-medium">{t.view.secretTitle}</p>
+            <pre className="whitespace-pre-wrap break-all rounded-xl border border-border bg-background p-3 text-sm">
+              {secret}
+            </pre>
+            <p className="text-xs text-muted">
+              {payload?.burnAfterReading
+                ? t.view.secretBurnedNotice
+                : t.view.secretPersistsNotice}
+            </p>
+          </div>
+        )}
+      </div>
+    </main>
   );
 }

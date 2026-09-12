@@ -1,60 +1,91 @@
-// app/page.tsx
 "use client";
 
 import { useState } from "react";
 import { encryptSecret } from "@/lib/crypto";
+import {
+  ALLOWED_LIFETIMES_SECONDS,
+  MAX_SECRET_PLAINTEXT_BYTES,
+  type LifetimeSeconds,
+} from "@/lib/secret-limits";
+import { useLocale } from "@/lib/i18n/use-locale";
+import { LanguageToggle } from "@/components/LanguageToggle";
+import { LifetimeSelector } from "@/components/LifetimeSelector";
+import { Toggle } from "@/components/Toggle";
+import { EyeIcon, EyeOffIcon } from "@/components/icons";
+
+const LIFETIME_LABEL_KEYS: Record<LifetimeSeconds, string> = {
+  900: "lifetime15min",
+  3600: "lifetime1hour",
+  21600: "lifetime6hours",
+  86400: "lifetime24hours",
+};
 
 export default function Home() {
+  const { locale, setLocale, t } = useLocale();
+
   const [secret, setSecret] = useState("");
-  const [password, setPassword] = useState("");
+  const [passphrase, setPassphrase] = useState("");
+  const [showPassphrase, setShowPassphrase] = useState(false);
+  const [lifetimeSeconds, setLifetimeSeconds] = useState<LifetimeSeconds>(86400);
+  const [burnAfterReading, setBurnAfterReading] = useState(true);
+
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [resultBurnAfterReading, setResultBurnAfterReading] = useState(true);
+  const [resultLifetimeSeconds, setResultLifetimeSeconds] =
+    useState<LifetimeSeconds>(86400);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleCreateSecret = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!secret.trim()) return;
+  const secretBytes = new TextEncoder().encode(secret).length;
+  const overLimit = secretBytes > MAX_SECRET_PLAINTEXT_BYTES;
+  const canSubmit = secret.trim().length > 0 && !overLimit && !loading;
+
+  const lifetimeOptions = ALLOWED_LIFETIMES_SECONDS.map((seconds) => ({
+    seconds,
+    label: t.home[LIFETIME_LABEL_KEYS[seconds] as keyof typeof t.home],
+  }));
+
+  const handleCreateSecret = async () => {
+    if (!canSubmit) return;
 
     setLoading(true);
+    setError(null);
     setShareUrl(null);
 
     try {
-      // 1. Encrypt secret client-side before sending to server
-      const {
-        base64UrlKey,
-        base64UrlIv,
-        base64Ciphertext,
-        base64PwdSalt,
-        base64PwdIv,
-      } = await encryptSecret(secret, password || undefined);
+      const encrypted = await encryptSecret(secret, passphrase || undefined);
 
-      // 2. Send only ciphertext and metadata to Redis
       const res = await fetch("/api/secret", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ciphertext: base64Ciphertext,
-          urlIv: base64UrlIv,
-          pwdSalt: base64PwdSalt,
-          pwdIv: base64PwdIv,
+          ciphertext: encrypted.base64Ciphertext,
+          ...(encrypted.mode === "url-key"
+            ? { urlIv: encrypted.base64UrlIv }
+            : { pwdSalt: encrypted.base64PwdSalt, pwdIv: encrypted.base64PwdIv }),
+          lifetimeSeconds,
+          burnAfterReading,
         }),
       });
 
-      if (!res.ok) throw new Error("Failed to store secret.");
+      if (!res.ok) throw new Error("request failed");
 
       const { id } = await res.json();
 
-      // 3. Assemble link with encryption key in hash fragment (#)
-      // Hash fragments are NEVER sent to the server in HTTP requests
       const origin = window.location.origin;
-      const generatedUrl = `${origin}/secret/${id}#${base64UrlKey}`;
+      const generatedUrl =
+        encrypted.mode === "url-key"
+          ? `${origin}/secret/${id}#${encrypted.base64UrlKey}`
+          : `${origin}/secret/${id}`;
 
       setShareUrl(generatedUrl);
+      setResultBurnAfterReading(burnAfterReading);
+      setResultLifetimeSeconds(lifetimeSeconds);
       setSecret("");
-      setPassword("");
-    } catch (err) {
-      console.error(err);
-      alert("An error occurred while creating the secret.");
+      setPassphrase("");
+    } catch {
+      setError(t.home.genericError);
     } finally {
       setLoading(false);
     }
@@ -67,73 +98,141 @@ export default function Home() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const resultLifetimeLabel =
+    t.home[LIFETIME_LABEL_KEYS[resultLifetimeSeconds] as keyof typeof t.home];
+  const resultMessage = (
+    resultBurnAfterReading ? t.home.resultBurnTrue : t.home.resultBurnFalse
+  ).replace("{lifetime}", resultLifetimeLabel);
+
   return (
-    <main className="max-w-xl mx-auto p-6 mt-12">
-      <h1 className="text-2xl font-bold mb-4">Share a Secret</h1>
-      <p className="text-gray-400 mb-6 text-sm">
-        Data is encrypted in your browser using AES-GCM. The encryption key never hits the server.
-      </p>
+    <main className="mx-auto w-full max-w-xl px-6 py-16">
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <p className="max-w-md text-sm leading-relaxed text-muted">
+          {t.home.intro}
+        </p>
+        <LanguageToggle locale={locale} onChange={setLocale} />
+      </div>
 
       {!shareUrl ? (
-        <form onSubmit={handleCreateSecret} className="space-y-4">
+        <div className="space-y-6 rounded-2xl border border-border bg-card p-6">
           <div>
-            <label className="block text-sm font-medium mb-1">Secret / Key / Token</label>
+            <div className="mb-2 flex items-baseline justify-between">
+              <label htmlFor="secret" className="font-medium">
+                {t.home.secretLabel}
+              </label>
+              <span
+                className={`font-mono text-xs ${
+                  overLimit ? "text-red-400" : "text-muted"
+                }`}
+              >
+                {secretBytes.toLocaleString()} /{" "}
+                {MAX_SECRET_PLAINTEXT_BYTES.toLocaleString()}
+              </span>
+            </div>
             <textarea
+              id="secret"
               required
-              rows={4}
+              rows={7}
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
-              placeholder="Paste your sensitive data here..."
-              className="w-full p-2 border rounded bg-transparent border-gray-700 text-white"
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  handleCreateSecret();
+                }
+              }}
+              placeholder={t.home.secretPlaceholder}
+              className="w-full resize-y rounded-xl border border-border bg-background p-3 text-sm placeholder:text-muted focus:border-muted focus:outline-none"
+            />
+            <p className="mt-2 text-xs text-muted">{t.home.keyboardHint}</p>
+          </div>
+
+          <div>
+            <p className="mb-2 font-medium">{t.home.lifetimeLabel}</p>
+            <LifetimeSelector
+              value={lifetimeSeconds}
+              onChange={setLifetimeSeconds}
+              options={lifetimeOptions}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-border p-4">
+            <div>
+              <p className="font-medium">{t.home.burnLabel}</p>
+              <p className="text-sm text-muted">{t.home.burnDescription}</p>
+            </div>
+            <Toggle
+              checked={burnAfterReading}
+              onChange={setBurnAfterReading}
+              label={t.home.burnLabel}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">
-              Optional Password <span className="text-gray-500">(Adds double-layer encryption)</span>
+            <label htmlFor="passphrase" className="mb-2 block font-medium">
+              {t.home.passphraseLabel}
             </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Leave empty for link-only protection"
-              className="w-full p-2 border rounded bg-transparent border-gray-700 text-white"
-            />
+            <div className="relative">
+              <input
+                id="passphrase"
+                type={showPassphrase ? "text" : "password"}
+                value={passphrase}
+                onChange={(e) => setPassphrase(e.target.value)}
+                placeholder={t.home.passphrasePlaceholder}
+                className="w-full rounded-xl border border-border bg-background p-3 pr-11 text-sm placeholder:text-muted focus:border-muted focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassphrase((v) => !v)}
+                aria-label={
+                  showPassphrase ? t.home.hidePassphrase : t.home.showPassphrase
+                }
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+              >
+                {showPassphrase ? (
+                  <EyeOffIcon className="h-5 w-5" />
+                ) : (
+                  <EyeIcon className="h-5 w-5" />
+                )}
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-muted">{t.home.passphraseHint}</p>
           </div>
 
+          {error && <p className="text-sm text-red-400">{error}</p>}
+
           <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 font-semibold rounded text-white disabled:opacity-50"
+            type="button"
+            onClick={handleCreateSecret}
+            disabled={!canSubmit}
+            className="w-full rounded-xl bg-accent py-3 font-semibold text-accent-foreground transition-opacity disabled:opacity-50"
           >
-            {loading ? "Encrypting & Storing..." : "Generate One-Time Link (24h Max)"}
+            {loading ? t.home.creatingButton : t.home.createButton}
           </button>
-        </form>
+        </div>
       ) : (
-        <div className="p-4 border border-green-800 rounded bg-green-950/20 space-y-4">
-          <p className="font-semibold text-green-400">Secret stored successfully!</p>
-          <p className="text-xs text-gray-400">
-            This link can only be viewed ONCE. It will burn immediately after decryption or expire in 24 hours.
-          </p>
+        <div className="space-y-4 rounded-2xl border border-border bg-card p-6">
+          <p className="font-medium">{t.home.resultTitle}</p>
+          <p className="text-sm text-muted">{resultMessage}</p>
           <div className="flex gap-2">
             <input
               readOnly
               type="text"
               value={shareUrl}
-              className="flex-1 p-2 border rounded text-sm bg-black/50 border-gray-700 text-gray-300"
+              className="flex-1 rounded-xl border border-border bg-background p-3 text-sm text-muted"
             />
             <button
               onClick={handleCopy}
-              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-sm font-medium"
+              className="rounded-xl border border-border px-4 py-2 text-sm font-medium hover:border-muted"
             >
-              {copied ? "Copied!" : "Copy"}
+              {copied ? t.home.copiedButton : t.home.copyButton}
             </button>
           </div>
           <button
             onClick={() => setShareUrl(null)}
-            className="text-xs text-gray-400 underline hover:text-white"
+            className="text-sm text-muted underline hover:text-foreground"
           >
-            Create another secret
+            {t.home.createAnotherButton}
           </button>
         </div>
       )}
