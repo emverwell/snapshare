@@ -165,6 +165,8 @@ export default function Home() {
               checked={burnAfterReading}
               onChange={setBurnAfterReading}
               label={t.home.burnLabel}
+              onLabel={t.home.burnOn}
+              offLabel={t.home.burnOff}
             />
           </div>
 
