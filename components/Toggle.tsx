@@ -4,29 +4,36 @@ export function Toggle({
   checked,
   onChange,
   label,
+  onLabel,
+  offLabel,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
+  onLabel: string;
+  offLabel: string;
 }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
+    <div
+      role="group"
       aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative h-7 w-12 shrink-0 appearance-none rounded-full transition-colors ${
-        checked ? "bg-accent" : "bg-border"
-      }`}
+      className="inline-flex items-center gap-1 rounded-full border border-border p-1 text-xs"
     >
-      <span
-        className={`absolute top-1 h-5 w-5 rounded-full transition-transform ${
-          checked
-            ? "translate-x-6 bg-accent-foreground"
-            : "translate-x-1 bg-muted"
-        }`}
-      />
-    </button>
+      {([false, true] as const).map((option) => (
+        <button
+          key={String(option)}
+          type="button"
+          onClick={() => onChange(option)}
+          aria-pressed={checked === option}
+          className={`rounded-full px-2.5 py-1 uppercase tracking-wide transition-colors ${
+            checked === option
+              ? "bg-accent text-accent-foreground"
+              : "text-muted hover:text-foreground"
+          }`}
+        >
+          {option ? onLabel : offLabel}
+        </button>
+      ))}
+    </div>
   );
 }
