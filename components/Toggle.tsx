@@ -16,7 +16,7 @@ export function Toggle({
       aria-checked={checked}
       aria-label={label}
       onClick={() => onChange(!checked)}
-      className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+      className={`relative h-7 w-12 shrink-0 appearance-none rounded-full transition-colors ${
         checked ? "bg-accent" : "bg-border"
       }`}
     >
