@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/emverwell/snapshare/compare/v1.0.1...v1.0.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* changed burn after read ([#19](https://github.com/emverwell/snapshare/issues/19)) ([2174576](https://github.com/emverwell/snapshare/commit/2174576ed2f17d94109cfdaa3dd337c36b4deed6))
+
 ## [1.0.1](https://github.com/emverwell/snapshare/compare/v1.0.0...v1.0.1) (2026-09-13)
 
 
