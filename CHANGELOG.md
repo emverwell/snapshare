@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/emverwell/snapshare/compare/v1.0.0...v1.0.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* changed appearance burn after read toggle ([#18](https://github.com/emverwell/snapshare/issues/18)) ([2959af1](https://github.com/emverwell/snapshare/commit/2959af149e691c0e8d66fe20b0e44a1604215014))
+
 # 1.0.0 (2026-09-12)
 
 
