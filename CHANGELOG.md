@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/emverwell/snapshare/compare/v1.0.2...v1.0.3) (2026-09-14)
+
+
+### Bug Fixes
+
+* added fixes for owasp top 10 ([a232566](https://github.com/emverwell/snapshare/commit/a232566b381577996bd5ab0c3485e5441cec65b4))
+
 ## [1.0.2](https://github.com/emverwell/snapshare/compare/v1.0.1...v1.0.2) (2026-09-13)
 
 
