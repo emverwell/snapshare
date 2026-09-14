@@ -21,12 +21,34 @@ export function getRedis(): Redis {
   return redisClient;
 }
 
+// Every response here carries a secret payload, an error, or the mere
+// existence/absence of one — none of it is safe for a shared/CDN cache to
+// retain, even briefly.
+export const NO_STORE_HEADERS: HeadersInit = {
+  "Cache-Control": "private, no-store",
+};
+
 export function errorResponse(
   status: number,
   error: string,
   headers?: HeadersInit
 ) {
-  return NextResponse.json({ error }, { status, headers });
+  return NextResponse.json(
+    { error },
+    { status, headers: { ...NO_STORE_HEADERS, ...headers } }
+  );
+}
+
+// console.error rather than a real log/metrics pipeline: this app has no
+// OTLP backend configured in production, so Vercel's own Runtime Logs (which
+// capture stderr with no setup required) are the only place these are
+// visible today. Never include ciphertext/passphrase/key material — only
+// identifiers useful for spotting an abuse pattern.
+export function logSecurityEvent(
+  event: string,
+  details: Record<string, unknown>
+) {
+  console.error(JSON.stringify({ event, ...details }));
 }
 
 // Real browser traffic always sends Origin on POST/PUT/DELETE/PATCH, same-
@@ -48,6 +70,22 @@ export function isSameOrigin(req: Request): boolean {
     originHost = null;
   }
   return !!originHost && !!host && originHost === host;
+}
+
+// GET on this route has a side effect (burns the secret if burnAfterReading
+// is set), so it needs the same class of check as isSameOrigin above — but
+// Origin isn't a usable signal here, since browsers only attach it to
+// state-changing methods, not plain GETs. Sec-Fetch-Site is: sent by every
+// evergreen browser on every request, it says outright whether the request
+// came from this site, a related one, or somewhere else entirely. Absent
+// header (non-browser clients, some older browsers) fails open rather than
+// break them — same trade-off isSameOrigin already documents for Origin.
+// "cross-site" is a third party's page (e.g. an <img src> embedding this
+// URL); "same-site" would be a different subdomain/port/scheme on the same
+// registrable domain, which this single-origin app never legitimately is.
+export function isCrossSiteFetch(req: Request): boolean {
+  const secFetchSite = req.headers.get("sec-fetch-site");
+  return secFetchSite === "cross-site" || secFetchSite === "same-site";
 }
 
 // Fixed by the AES-GCM/PBKDF2 scheme in lib/crypto.ts: 12-byte IVs, 16-byte salt.
