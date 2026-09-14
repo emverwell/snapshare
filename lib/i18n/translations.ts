@@ -20,6 +20,8 @@ export const translations = {
       lifetime24hours: "24 hours",
       burnLabel: "Burn after reading",
       burnDescription: "Destroyed as soon as it's opened",
+      burnOn: "On",
+      burnOff: "Off",
       passphraseLabel: "Passphrase (optional)",
       passphrasePlaceholder: "Only people with this phrase can open it",
       passphraseHint:
@@ -69,6 +71,8 @@ export const translations = {
       lifetime24hours: "24 horas",
       burnLabel: "Destruir tras leer",
       burnDescription: "Se destruye en cuanto se abre",
+      burnOn: "Sí",
+      burnOff: "No",
       passphraseLabel: "Frase secreta (opcional)",
       passphrasePlaceholder: "Solo quien tenga esta frase podrá abrirlo",
       passphraseHint:
