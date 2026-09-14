@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import {
   MAX_BODY_BYTES,
+  NO_STORE_HEADERS,
   errorResponse,
   getClientIp,
   getRedis,
   isSameOrigin,
+  logSecurityEvent,
   readBodyWithLimit,
   secretWriteRatelimit,
   validateSecretPayload,
@@ -27,6 +29,11 @@ export async function POST(req: Request) {
   }
 
   if (!isSameOrigin(req)) {
+    logSecurityEvent('origin_rejected', {
+      ip: getClientIp(req),
+      origin: req.headers.get('origin'),
+      host: req.headers.get('host'),
+    });
     return errorResponse(403, 'forbidden');
   }
 
@@ -39,6 +46,7 @@ export async function POST(req: Request) {
   try {
     const { success, reset } = await secretWriteRatelimit.limit(ip);
     if (!success) {
+      logSecurityEvent('rate_limited', { ip, route: 'write' });
       const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
       return errorResponse(429, 'rate limit exceeded', {
         'Retry-After': String(retryAfter),
@@ -72,5 +80,5 @@ export async function POST(req: Request) {
     burnAfterReading: payload.burnAfterReading,
   });
 
-  return NextResponse.json({ id });
+  return NextResponse.json({ id }, { headers: NO_STORE_HEADERS });
 }

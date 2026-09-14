@@ -4,6 +4,7 @@ import {
   IV_B64_LEN,
   SALT_B64_LEN,
   getClientIp,
+  isCrossSiteFetch,
   isValidSecretId,
   readBodyWithLimit,
   validateSecretPayload,
@@ -335,6 +336,33 @@ describe("getClientIp", () => {
   it('falls back to "unknown" when neither header is present', () => {
     const req = new Request("http://localhost/");
     expect(getClientIp(req)).toBe("unknown");
+  });
+});
+
+describe("isCrossSiteFetch", () => {
+  it.each(["cross-site", "same-site"])(
+    "rejects a %s Sec-Fetch-Site value",
+    (value) => {
+      const req = new Request("http://localhost/", {
+        headers: { "sec-fetch-site": value },
+      });
+      expect(isCrossSiteFetch(req)).toBe(true);
+    }
+  );
+
+  it.each(["same-origin", "none"])(
+    "accepts a %s Sec-Fetch-Site value",
+    (value) => {
+      const req = new Request("http://localhost/", {
+        headers: { "sec-fetch-site": value },
+      });
+      expect(isCrossSiteFetch(req)).toBe(false);
+    }
+  );
+
+  it("fails open when Sec-Fetch-Site is absent (non-browser clients)", () => {
+    const req = new Request("http://localhost/");
+    expect(isCrossSiteFetch(req)).toBe(false);
   });
 });
 
