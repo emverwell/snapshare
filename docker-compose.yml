@@ -62,14 +62,14 @@ services:
   # above. Off by default; start explicitly with:
   #   docker compose --profile observability up
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.116.1
+    image: otel/opentelemetry-collector-contrib:0.160.0
     restart: unless-stopped
     profiles: ["observability"]
     volumes:
       - ./observability/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
 
   prometheus:
-    image: prom/prometheus:v3.1.0
+    image: prom/prometheus:v3.14.0
     restart: unless-stopped
     profiles: ["observability"]
     volumes:
@@ -78,7 +78,7 @@ services:
       - otel-collector
 
   grafana:
-    image: grafana/grafana:11.4.0
+    image: grafana/grafana:13.2.1
     restart: unless-stopped
     profiles: ["observability"]
     ports:
