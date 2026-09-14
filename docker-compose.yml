@@ -78,7 +78,7 @@ services:
       - otel-collector
 
   grafana:
-    image: grafana/grafana:11.4.0
+    image: grafana/grafana:13.2.1
     restart: unless-stopped
     profiles: ["observability"]
     ports:
