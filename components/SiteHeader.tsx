@@ -17,8 +17,11 @@ export function SiteHeader({
 }) {
   return (
     <div className="mb-8 flex items-center justify-between gap-4">
-      <Link href="/" className="font-serif text-lg tracking-tight">
-        {brand}
+      <Link href="/" className="shrink-0">
+        {/* eslint-disable-next-line @next/next/no-img-element -- fixed-size
+            wordmark, not worth the sharp dependency next/image needs for
+            self-hosted (non-Vercel) optimization */}
+        <img src="/logo.png" alt={brand} width={150} height={50} />
       </Link>
       <div className="flex items-center gap-4">
         <Link
