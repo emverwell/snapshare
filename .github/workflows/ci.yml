@@ -116,7 +116,14 @@ jobs:
       # exactly the shape of the supply-chain attack that hit Trivy's tags.
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # Must be a real token, not secrets.GITHUB_TOKEN: GitHub doesn't
+          # trigger other workflow runs for pushes/PRs authored by the
+          # default token (anti-recursion guard), so the release PR this
+          # action opens would never get the lint/typecheck/test/
+          # docker-build-and-scan checks main's branch protection requires,
+          # and could never be merged. RELEASE_PLEASE_TOKEN is a
+          # repo-scoped PAT for exactly this.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
   preview-deploy:
     runs-on: ubuntu-latest
