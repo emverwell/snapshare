@@ -97,32 +97,23 @@ jobs:
       - name: Deploy to Vercel
         run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
 
-  release:
+  release-please:
     runs-on: ubuntu-latest
     needs: docker-build-and-scan
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    # contents: write to push the version-bump/changelog commit and tag;
-    # issues/pull-requests: write because semantic-release comments on the
-    # issues/PRs included in a release.
+    # contents: write to open/update the release PR and, once it's merged,
+    # create the tag and GitHub Release; pull-requests: write for the PR
+    # itself. Unlike the old semantic-release job, this never pushes
+    # straight to main — main's branch protection requires changes to land
+    # through a PR, and the release PR merge is what actually cuts a
+    # release.
     permissions:
       contents: write
-      issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: googleapis/release-please-action@v4
         with:
-          # semantic-release needs the full commit history (since the last
-          # tag) to decide the next version — the default shallow checkout
-          # only has the latest commit.
-          fetch-depth: 0
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx semantic-release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   preview-deploy:
     runs-on: ubuntu-latest
