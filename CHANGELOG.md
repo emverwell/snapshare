@@ -5,6 +5,14 @@
 
 * added fixes for owasp top 10 ([a232566](https://github.com/emverwell/snapshare/commit/a232566b381577996bd5ab0c3485e5441cec65b4))
 
+## [1.2.0](https://github.com/emverwell/snapshare/compare/snapshare-v1.1.0...snapshare-v1.2.0) (2026-09-20)
+
+
+### Features
+
+* added snapshare logo ([d39d30a](https://github.com/emverwell/snapshare/commit/d39d30af76c67a488e56143080ba54868ea70e83))
+* added snapshare logo ([f5e6ce8](https://github.com/emverwell/snapshare/commit/f5e6ce8ed56abff1e5aca3f3d967d4a718d999bf))
+
 ## [1.1.0](https://github.com/emverwell/snapshare/compare/snapshare-v1.0.3...snapshare-v1.1.0) (2026-09-20)
 
 
