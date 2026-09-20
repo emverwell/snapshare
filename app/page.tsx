@@ -8,7 +8,8 @@ import {
   type LifetimeSeconds,
 } from "@/lib/secret-limits";
 import { useLocale } from "@/lib/i18n/use-locale";
-import { LanguageToggle } from "@/components/LanguageToggle";
+import { SiteHeader } from "@/components/SiteHeader";
+import { SiteFooter } from "@/components/SiteFooter";
 import { LifetimeSelector } from "@/components/LifetimeSelector";
 import { Toggle } from "@/components/Toggle";
 import { EyeIcon, EyeOffIcon } from "@/components/icons";
@@ -106,12 +107,15 @@ export default function Home() {
 
   return (
     <main className="mx-auto w-full max-w-xl px-6 py-16">
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <p className="max-w-md text-sm leading-relaxed text-muted">
-          {t.home.intro}
-        </p>
-        <LanguageToggle locale={locale} onChange={setLocale} />
-      </div>
+      <SiteHeader
+        locale={locale}
+        onLocaleChange={setLocale}
+        brand={t.nav.brand}
+        howItWorksLabel={t.nav.howItWorks}
+      />
+      <p className="mb-6 max-w-md text-sm leading-relaxed text-muted">
+        {t.home.intro}
+      </p>
 
       {!shareUrl ? (
         <div className="space-y-6 rounded-2xl border border-border bg-card p-6">
@@ -238,6 +242,8 @@ export default function Home() {
           </button>
         </div>
       )}
+
+      <SiteFooter t={t} />
     </main>
   );
 }
