@@ -62,7 +62,7 @@ services:
   # above. Off by default; start explicitly with:
   #   docker compose --profile observability up
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.160.0
+    image: otel/opentelemetry-collector-contrib:0.161.0
     restart: unless-stopped
     profiles: ["observability"]
     volumes:
