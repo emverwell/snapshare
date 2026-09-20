@@ -9,7 +9,7 @@ plaintext, and in passphrase mode it never sees the key either.
 [![CI](https://github.com/emverwell/snapshare/actions/workflows/ci.yml/badge.svg)](https://github.com/emverwell/snapshare/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/emverwell/snapshare)](LICENSE)
 [![Trivy scan](https://img.shields.io/badge/container%20scan-Trivy-1904DA?logo=trivy&logoColor=white)](https://github.com/emverwell/snapshare/actions/workflows/ci.yml)
-[![semantic-release: angular](https://img.shields.io/badge/semantic--release-angular-e10079?logo=semantic-release)](https://github.com/semantic-release/semantic-release)
+[![release-please](https://img.shields.io/badge/release--please-enabled-blue?logo=googlecloud&logoColor=white)](https://github.com/googleapis/release-please)
 [![Dependabot](https://img.shields.io/badge/Dependabot-enabled-025E8C?logo=dependabot&logoColor=white)](.github/dependabot.yml)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](Dockerfile)
 
@@ -112,9 +112,11 @@ scan (pinned by commit SHA, not a tag — [a real supply-chain compromise](https
 hit this action's tags in the wild). All of it has to pass before `main` can
 deploy — Vercel's own auto-deploy-on-push is disabled specifically so a
 failing gate actually blocks production, not just shows red after the fact.
-Releases are cut by [semantic-release](https://github.com/semantic-release/semantic-release)
-from commit messages; Dependabot keeps npm, GitHub Actions, and both Docker
-surfaces current on a weekly cycle.
+Releases are cut by [release-please](https://github.com/googleapis/release-please)
+from commit messages: it keeps a standing release PR with the version bump
+and changelog, and merging it creates the tag and GitHub Release; Dependabot
+keeps npm, GitHub Actions, and both Docker surfaces current on a weekly
+cycle.
 
 ## Security
 
