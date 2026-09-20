@@ -111,7 +111,10 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: googleapis/release-please-action@v4
+      # Pinned by commit SHA, not a tag — same rationale as the Trivy action
+      # above: a floating major-version tag with contents/PR write access is
+      # exactly the shape of the supply-chain attack that hit Trivy's tags.
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
