@@ -114,7 +114,7 @@ jobs:
       # Pinned by commit SHA, not a tag — same rationale as the Trivy action
       # above: a floating major-version tag with contents/PR write access is
       # exactly the shape of the supply-chain attack that hit Trivy's tags.
-      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           # Must be a real token, not secrets.GITHUB_TOKEN: GitHub doesn't
           # trigger other workflow runs for pushes/PRs authored by the
