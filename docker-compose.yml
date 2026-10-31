@@ -69,7 +69,7 @@ services:
       - ./observability/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
 
   prometheus:
-    image: prom/prometheus:v3.14.0
+    image: prom/prometheus:v3.15.1
     restart: unless-stopped
     profiles: ["observability"]
     volumes:
